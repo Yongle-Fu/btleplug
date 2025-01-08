@@ -46,8 +46,7 @@ dependencies = [
 [[package]]
 name = "bluez-async"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84ae4213cc2a8dc663acecac67bbdad05142be4d8ef372b6903abf878b0c690a"
+source = "git+https://github.com/Yongle-Fu/bluez-async?branch=main#8b72d86dbd171f2d67a2320b335640358e8cf180"
 dependencies = [
  "bitflags",
  "bluez-generated",
@@ -66,8 +65,7 @@ dependencies = [
 [[package]]
 name = "bluez-generated"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9676783265eadd6f11829982792c6f303f3854d014edfba384685dcf237dd062"
+source = "git+https://github.com/Yongle-Fu/bluez-async?branch=main#8b72d86dbd171f2d67a2320b335640358e8cf180"
 dependencies = [
  "dbus",
 ]
