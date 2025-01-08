@@ -338,6 +338,10 @@ impl From<DeviceId> for PeripheralId {
     fn from(device_id: DeviceId) -> Self {
         PeripheralId(device_id)
     }
+
+    fn from_str(id: &str) -> Self {
+        PeripheralId::from(DeviceId::new(id))
+    }
 }
 
 impl From<bluez_async::AddressType> for AddressType {
