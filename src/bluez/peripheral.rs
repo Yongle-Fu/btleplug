@@ -46,7 +46,13 @@ struct ServiceInternal {
     serde(crate = "serde_cr")
 )]
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct PeripheralId(pub DeviceId);
+pub struct PeripheralId(pub(crate) DeviceId);
+
+impl PeripheralId {
+    pub fn from_str(s: &str) -> Self {
+        Self(DeviceId::new(s))
+    }
+}
 
 impl Display for PeripheralId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
