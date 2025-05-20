@@ -17,6 +17,7 @@ pub struct JPeripheral<'a: 'b, 'b> {
     connect: JMethodID<'a>,
     disconnect: JMethodID<'a>,
     is_connected: JMethodID<'a>,
+    request_mtu: JMethodID<'a>,
     discover_services: JMethodID<'a>,
     read: JMethodID<'a>,
     write: JMethodID<'a>,
@@ -67,6 +68,7 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
             "()Lio/github/gedgygedgy/rust/future/Future;",
         )?;
         let is_connected = env.get_method_id(class, "isConnected", "()Z")?;
+        let request_mtu = env.get_method_id(class, "requestMtu", "(I)Lio/github/gedgygedgy/rust/future/Future;")?;
         let discover_services = env.get_method_id(
             class,
             "discoverServices",
@@ -107,6 +109,7 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
             connect,
             disconnect,
             is_connected,
+            request_mtu,
             discover_services,
             read,
             write,
@@ -172,6 +175,19 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
                 &[],
             )?
             .z()
+    }
+
+    pub fn request_mtu(&self, mtu: usize) -> Result<JFuture<'a, 'b>> {
+        let future_obj = self
+            .env
+            .call_method_unchecked(
+                self.internal,
+                self.request_mtu,
+                JavaType::Object("Lio/github/gedgygedgy/rust/future/Future;".to_string()),
+                &[(mtu as u16).into()],
+            )?
+            .l()?;
+        JFuture::from_env(self.env, future_obj)
     }
 
     pub fn discover_services(&self) -> Result<JFuture<'a, 'b>> {

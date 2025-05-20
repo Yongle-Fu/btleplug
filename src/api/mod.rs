@@ -261,6 +261,9 @@ pub trait Peripheral: Send + Sync + Clone + Debug {
     /// Discovers all services for the device, including their characteristics.
     async fn discover_services(&self) -> Result<()>;
 
+    #[cfg(target_os = "android")]
+    async fn request_mtu(&self, mtu: usize) -> Result<()>;
+
     /// Write some data to the characteristic. Returns an error if the write couldn't be sent or (in
     /// the case of a write-with-response) if the device returns an error.
     async fn write(

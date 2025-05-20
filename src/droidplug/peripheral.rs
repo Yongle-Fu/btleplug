@@ -44,6 +44,11 @@ impl Display for PeripheralId {
         Display::fmt(&self.0, f)
     }
 }
+impl From<BDAddr> for PeripheralId {
+    fn from(address: BDAddr) -> Self {
+        PeripheralId(address)
+    }
+}
 
 fn get_poll_result<'a: 'b, 'b>(
     env: &'b JNIEnv<'a>,
@@ -242,6 +247,15 @@ impl api::Peripheral for Peripheral {
 
     async fn disconnect(&self) -> Result<()> {
         let future = self.with_obj(|_env, obj| JSendFuture::try_from(obj.disconnect()?))?;
+        let result_ref = future.await?;
+        self.with_obj(|env, _obj| {
+            let result = JPollResult::from_env(env, result_ref.as_obj())?;
+            get_poll_result(env, result).map(|_| {})
+        })
+    }
+
+    async fn request_mtu(&self, mtu: usize) -> Result<()> {
+        let future = self.with_obj(|_env, obj| JSendFuture::try_from(obj.request_mtu(mtu)?))?;
         let result_ref = future.await?;
         self.with_obj(|env, _obj| {
             let result = JPollResult::from_env(env, result_ref.as_obj())?;

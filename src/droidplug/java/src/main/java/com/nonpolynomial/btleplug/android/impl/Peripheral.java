@@ -122,6 +122,34 @@ class Peripheral {
     }
 
     @SuppressLint("MissingPermission")
+    public Future<Void> requestMtu(int mtu) {
+        SimpleFuture<Void> future = new SimpleFuture<>();
+        synchronized (this) {
+            this.queueCommand(() -> {
+                this.asyncWithFuture(future, () -> {
+                    if (!this.connected) {
+                        Peripheral.this.wakeCommand(future, null);
+                    } else {
+                        this.setCommandCallback(new CommandCallback() {
+                            @Override
+                            public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+                                Peripheral.this.asyncWithFuture(future, () -> {
+                                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                                        throw new RuntimeException("Unable to change MTU");
+                                    }
+                                    Peripheral.this.wakeCommand(future, null);
+                                });
+                            }
+                        });
+                        this.gatt.requestMtu(mtu);
+                    }
+                });
+            });
+        }
+        return future;
+    }
+
+    @SuppressLint("MissingPermission")
     public Future<byte[]> read(UUID uuid) {
         SimpleFuture<byte[]> future = new SimpleFuture<>();
         synchronized (this) {
@@ -488,6 +516,15 @@ class Peripheral {
         }
 
         @Override
+        public void onMtuChanged (BluetoothGatt gatt, int mtu, int status) {
+            synchronized (Peripheral.this) {
+                if (Peripheral.this.commandCallback != null) {
+                    Peripheral.this.commandCallback.onMtuChanged(gatt, mtu, status);
+                }
+            }
+        }
+
+        @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             synchronized (Peripheral.this) {
                 if (Peripheral.this.commandCallback != null) {
@@ -541,6 +578,11 @@ class Peripheral {
     private static abstract class CommandCallback extends BluetoothGattCallback {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            throw new UnexpectedCallbackException();
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
             throw new UnexpectedCallbackException();
         }
 
