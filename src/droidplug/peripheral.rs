@@ -274,6 +274,9 @@ impl api::Peripheral for Peripheral {
             Ok(())
         })?;
         // Auto-negotiate maximum MTU (517) after connection
+        // NOTE(Custom): Upstream currently auto-negotiates MTU to max 517 upon connection.
+        // If specific business logic requires a manual or custom MTU setup in the future, 
+        // we should re-expose `request_mtu(mtu: usize)` in the `api::Peripheral` trait and map it to `obj.request_mtu` here.
         let mtu_future = self.with_obj(|env, obj| {
             JSendFuture::try_from(JFuture::from_env(env, obj.request_mtu(517)?)?)
         })?;
