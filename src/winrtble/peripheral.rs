@@ -703,6 +703,14 @@ impl ApiPeripheral for Peripheral {
             None => Err(Error::NotConnected),
         }
     }
+
+    async fn pair(&self) -> Result<()> {
+        let device = self.shared.device.lock().await;
+        match &*device {
+            Some(device) => utils::pair_device(&device.device).await,
+            None => Err(Error::NotConnected),
+        }
+    }
 }
 
 impl From<BDAddr> for PeripheralId {

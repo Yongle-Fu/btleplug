@@ -49,34 +49,71 @@ impl BLEDescriptor {
     pub async fn write_value(&self, data: &[u8]) -> Result<()> {
         let writer = DataWriter::new()?;
         writer.WriteBytes(data)?;
-        let operation = self.descriptor.WriteValueAsync(&writer.DetachBuffer()?)?;
-        let result = operation.into_future().await?;
-        if result == GattCommunicationStatus::Success {
-            Ok(())
-        } else {
-            Err(Error::Other(
-                format!("Windows UWP threw error on write descriptor: {:?}", result).into(),
-            ))
+        let buffer = writer.DetachBuffer()?;
+        let mut attempts = 0;
+        loop {
+            let operation = self.descriptor.WriteValueAsync(&buffer)?;
+            let res = operation.into_future().await;
+            match res {
+                Ok(result) => {
+                    if result == GattCommunicationStatus::Success {
+                        return Ok(());
+                    } else {
+                        return Err(Error::Other(
+                            format!("Windows UWP threw error on write descriptor: {:?}", result).into(),
+                        ));
+                    }
+                }
+                Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
+                    attempts += 1;
+                    if let Err(pair_err) = utils::pair_from_descriptor(&self.descriptor).await {
+                        log::warn!("Auto-pairing failed during write descriptor: {:?}", pair_err);
+                        return Err(Error::from(err));
+                    }
+                    continue;
+                }
+                Err(err) => {
+                    return Err(Error::from(err));
+                }
+            }
         }
     }
 
     pub async fn read_value(&self) -> Result<Vec<u8>> {
-        let result = self
-            .descriptor
-            .ReadValueWithCacheModeAsync(BluetoothCacheMode::Uncached)?
-            .into_future()
-            .await?;
-        if result.Status()? == GattCommunicationStatus::Success {
-            let value = result.Value()?;
-            let reader = DataReader::FromBuffer(&value)?;
-            let len = reader.UnconsumedBufferLength()? as usize;
-            let mut input = vec![0u8; len];
-            reader.ReadBytes(&mut input[0..len])?;
-            Ok(input)
-        } else {
-            Err(Error::Other(
-                format!("Windows UWP threw error on read: {:?}", result).into(),
-            ))
+        let mut attempts = 0;
+        loop {
+            let res = self
+                .descriptor
+                .ReadValueWithCacheModeAsync(BluetoothCacheMode::Uncached)?
+                .into_future()
+                .await;
+            match res {
+                Ok(result) => {
+                    if result.Status()? == GattCommunicationStatus::Success {
+                        let value = result.Value()?;
+                        let reader = DataReader::FromBuffer(&value)?;
+                        let len = reader.UnconsumedBufferLength()? as usize;
+                        let mut input = vec![0u8; len];
+                        reader.ReadBytes(&mut input[0..len])?;
+                        return Ok(input);
+                    } else {
+                        return Err(Error::Other(
+                            format!("Windows UWP threw error on read: {:?}", result).into(),
+                        ));
+                    }
+                }
+                Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
+                    attempts += 1;
+                    if let Err(pair_err) = utils::pair_from_descriptor(&self.descriptor).await {
+                        log::warn!("Auto-pairing failed during read descriptor: {:?}", pair_err);
+                        return Err(Error::from(err));
+                    }
+                    continue;
+                }
+                Err(err) => {
+                    return Err(Error::from(err));
+                }
+            }
         }
     }
 }

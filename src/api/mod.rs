@@ -378,6 +378,11 @@ pub trait Peripheral: Send + Sync + Clone + Debug {
     async fn read_rssi(&self) -> Result<i16> {
         Err(crate::Error::NotSupported("read_rssi".to_string()))
     }
+
+    /// Pair the peripheral. Not supported on all platforms.
+    async fn pair(&self) -> Result<()> {
+        Err(crate::Error::NotSupported("pair".to_string()))
+    }
 }
 
 #[cfg_attr(
