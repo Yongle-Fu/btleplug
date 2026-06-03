@@ -36,7 +36,7 @@ pub type ConnectedEventHandler = Box<dyn Fn(bool) + Send>;
 pub type MaxPduSizeChangedEventHandler = Box<dyn Fn(u16) + Send>;
 
 pub struct BLEDevice {
-    device: BluetoothLEDevice,
+    pub(crate) device: BluetoothLEDevice,
     gatt_session: GattSession,
     connection_token: i64,
     pdu_change_token: i64,
