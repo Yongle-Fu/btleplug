@@ -16,12 +16,80 @@ use std::str::FromStr;
 use uuid::Uuid;
 use windows::core::GUID;
 use windows::{
-    Devices::Bluetooth::GenericAttributeProfile::{
-        GattCharacteristicProperties, GattClientCharacteristicConfigurationDescriptorValue,
-        GattCommunicationStatus,
+    Devices::Bluetooth::{
+        BluetoothLEDevice,
+        GenericAttributeProfile::{
+            GattCharacteristic, GattCharacteristicProperties,
+            GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
+            GattDescriptor,
+        },
     },
     Storage::Streams::{DataReader, IBuffer},
 };
+
+pub fn is_encryption_error(err: &windows::core::Error) -> bool {
+    let code = err.code().0;
+    // 0x8065000F: E_BLUETOOTH_ATT_INSUFFICIENT_ENCRYPTION
+    // 0x80650009: E_BLUETOOTH_ATT_INSUFFICIENT_AUTHENTICATION
+    if code == 0x8065000F_u32 as i32 || code == 0x80650009_u32 as i32 {
+        return true;
+    }
+    let msg = err.to_string().to_lowercase();
+    msg.contains("encryption") || msg.contains("insufficient")
+}
+
+pub async fn pair_device(device: &BluetoothLEDevice) -> Result<()> {
+    let dev_info = device
+        .DeviceInformation()
+        .map_err(|e| Error::Other(format!("Failed to get DeviceInformation: {:?}", e).into()))?;
+    let pairing = dev_info
+        .Pairing()
+        .map_err(|e| Error::Other(format!("Failed to get DeviceInformationPairing: {:?}", e).into()))?;
+
+    if !pairing.IsPaired().unwrap_or(false) {
+        log::info!("Device is not paired. Initiating pairing...");
+        let op = pairing
+            .PairAsync()
+            .map_err(|e| Error::Other(format!("PairAsync call failed: {:?}", e).into()))?;
+        let result = op
+            .await
+            .map_err(|e| Error::Other(format!("PairAsync operation failed: {:?}", e).into()))?;
+        let status = result
+            .Status()
+            .map_err(|e| Error::Other(format!("Failed to get PairingStatus: {:?}", e).into()))?;
+        log::info!("Pairing completed with status: {:?}", status);
+        // 0 = Paired, 3 = AlreadyPaired
+        if status.0 != 0 && status.0 != 3 {
+            return Err(Error::Other(format!("Pairing failed: {:?}", status).into()));
+        }
+        // Give Windows a moment to stabilize the encryption state
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    } else {
+        log::info!("Device is already paired.");
+    }
+    Ok(())
+}
+
+pub async fn pair_from_characteristic(
+    characteristic: &GattCharacteristic,
+) -> Result<()> {
+    let service = characteristic
+        .Service()
+        .map_err(|e| Error::Other(format!("Failed to get Service: {:?}", e).into()))?;
+    let device = service
+        .Device()
+        .map_err(|e| Error::Other(format!("Failed to get Device: {:?}", e).into()))?;
+    pair_device(&device).await
+}
+
+pub async fn pair_from_descriptor(
+    descriptor: &GattDescriptor,
+) -> Result<()> {
+    let characteristic = descriptor
+        .Characteristic()
+        .map_err(|e| Error::Other(format!("Failed to get Characteristic: {:?}", e).into()))?;
+    pair_from_characteristic(&characteristic).await
+}
 
 pub fn to_error(status: GattCommunicationStatus) -> Result<()> {
     if status == GattCommunicationStatus::AccessDenied {
