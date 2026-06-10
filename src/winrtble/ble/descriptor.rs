@@ -50,11 +50,12 @@ impl BLEDescriptor {
     pub async fn write_value(&self, data: &[u8]) -> Result<()> {
         let mut attempts = 0;
         loop {
-            let writer = DataWriter::new()?;
-            writer.WriteBytes(data)?;
-            let buffer = writer.DetachBuffer()?;
-            let operation = self.descriptor.WriteValueAsync(&buffer)?;
-            drop(buffer);
+            let operation = {
+                let writer = DataWriter::new()?;
+                writer.WriteBytes(data)?;
+                let buffer = writer.DetachBuffer()?;
+                self.descriptor.WriteValueAsync(&buffer)?
+            };
             let res = operation.into_future().await;
             match res {
                 Ok(result) => {
