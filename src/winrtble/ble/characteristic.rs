@@ -65,14 +65,15 @@ impl BLECharacteristic {
     }
 
     pub async fn write_value(&self, data: &[u8], write_type: WriteType) -> Result<()> {
-        let writer = DataWriter::new()?;
-        writer.WriteBytes(data)?;
-        let buffer = writer.DetachBuffer()?;
         let mut attempts = 0;
         loop {
+            let writer = DataWriter::new()?;
+            writer.WriteBytes(data)?;
+            let buffer = writer.DetachBuffer()?;
             let operation = self
                 .characteristic
                 .WriteValueWithOptionAsync(&buffer, write_type.into())?;
+            drop(buffer);
             let res = operation.into_future().await;
             match res {
                 Ok(result) => {

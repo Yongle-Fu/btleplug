@@ -18,19 +18,20 @@ use uuid::Uuid;
 use windows::{
     Devices::Bluetooth::{
         BluetoothCacheMode,
-        GenericAttributeProfile::{GattCommunicationStatus, GattDescriptor},
+        GenericAttributeProfile::{GattCommunicationStatus, GattDescriptor, GattCharacteristic},
     },
     Storage::Streams::{DataReader, DataWriter},
 };
 
 #[derive(Debug)]
 pub struct BLEDescriptor {
+    characteristic: GattCharacteristic,
     descriptor: GattDescriptor,
 }
 
 impl BLEDescriptor {
-    pub fn new(descriptor: GattDescriptor) -> Self {
-        Self { descriptor }
+    pub fn new(characteristic: GattCharacteristic, descriptor: GattDescriptor) -> Self {
+        Self { characteristic, descriptor }
     }
 
     pub fn uuid(&self) -> Uuid {
@@ -47,12 +48,13 @@ impl BLEDescriptor {
     }
 
     pub async fn write_value(&self, data: &[u8]) -> Result<()> {
-        let writer = DataWriter::new()?;
-        writer.WriteBytes(data)?;
-        let buffer = writer.DetachBuffer()?;
         let mut attempts = 0;
         loop {
+            let writer = DataWriter::new()?;
+            writer.WriteBytes(data)?;
+            let buffer = writer.DetachBuffer()?;
             let operation = self.descriptor.WriteValueAsync(&buffer)?;
+            drop(buffer);
             let res = operation.into_future().await;
             match res {
                 Ok(result) => {
@@ -66,7 +68,7 @@ impl BLEDescriptor {
                 }
                 Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
                     attempts += 1;
-                    if let Err(pair_err) = utils::pair_from_descriptor(&self.descriptor).await {
+                    if let Err(pair_err) = utils::pair_from_characteristic(&self.characteristic).await {
                         log::warn!("Auto-pairing failed during write descriptor: {:?}", pair_err);
                         return Err(Error::from(err));
                     }
@@ -104,7 +106,7 @@ impl BLEDescriptor {
                 }
                 Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
                     attempts += 1;
-                    if let Err(pair_err) = utils::pair_from_descriptor(&self.descriptor).await {
+                    if let Err(pair_err) = utils::pair_from_characteristic(&self.characteristic).await {
                         log::warn!("Auto-pairing failed during read descriptor: {:?}", pair_err);
                         return Err(Error::from(err));
                     }
