@@ -82,14 +82,7 @@ pub async fn pair_from_characteristic(
     pair_device(&device).await
 }
 
-pub async fn pair_from_descriptor(
-    descriptor: &GattDescriptor,
-) -> Result<()> {
-    let characteristic = descriptor
-        .Characteristic()
-        .map_err(|e| Error::Other(format!("Failed to get Characteristic: {:?}", e).into()))?;
-    pair_from_characteristic(&characteristic).await
-}
+
 
 pub fn to_error(status: GattCommunicationStatus) -> Result<()> {
     if status == GattCommunicationStatus::AccessDenied {
