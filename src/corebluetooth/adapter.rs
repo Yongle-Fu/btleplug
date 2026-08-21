@@ -4,7 +4,7 @@ use super::internal::{
 };
 use super::peripheral::{Peripheral, PeripheralId};
 use crate::api::{
-    BDAddr, Central, CentralEvent, CentralState, Peripheral as PeripheralTrait,
+    BDAddr, Central, CentralEvent, CentralState, GattTransport, Peripheral as PeripheralTrait,
     RetrievePeripheralsOptions, ScanFilter,
 };
 use crate::common::adapter_manager::AdapterManager;
@@ -166,9 +166,18 @@ impl Central for Adapter {
     }
 
     async fn start_scan(&self, filter: ScanFilter) -> Result<()> {
+        self.start_scan_with_transport(filter, GattTransport::Le)
+            .await
+    }
+
+    async fn start_scan_with_transport(
+        &self,
+        filter: ScanFilter,
+        transport: GattTransport,
+    ) -> Result<()> {
         self.sender
             .to_owned()
-            .send(CoreBluetoothMessage::StartScanning { filter })
+            .send(CoreBluetoothMessage::StartScanning { filter, transport })
             .await?;
         Ok(())
     }
