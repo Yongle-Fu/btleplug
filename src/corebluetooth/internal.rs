@@ -20,8 +20,8 @@ use super::{
 };
 use crate::Error;
 use crate::api::{
-    CharPropFlags, Characteristic, Descriptor, RetrievePeripheralsOptions, ScanFilter, Service,
-    WriteType,
+    CharPropFlags, Characteristic, Descriptor, GattTransport, RetrievePeripheralsOptions,
+    ScanFilter, Service, WriteType,
 };
 use futures::channel::mpsc::{self, Receiver, Sender};
 use futures::select;
@@ -474,6 +474,7 @@ pub enum CoreBluetoothMessage {
     },
     StartScanning {
         filter: ScanFilter,
+        transport: GattTransport,
     },
     StopScanning,
     ConnectDevice {
@@ -1650,7 +1651,7 @@ impl CoreBluetoothInternal {
                     CoreBluetoothMessage::GetAdapterState { future } => {
                         self.get_adapter_state(future);
                     },
-                    CoreBluetoothMessage::StartScanning{filter} => self.start_discovery(filter),
+                    CoreBluetoothMessage::StartScanning{filter, transport} => self.start_discovery(filter, transport).await,
                     CoreBluetoothMessage::StopScanning => self.stop_discovery(),
                     CoreBluetoothMessage::ConnectDevice{peripheral_uuid, future} => {
                         trace!("got connectdevice msg!");
@@ -1714,7 +1715,7 @@ impl CoreBluetoothInternal {
             .set_reply(CoreBluetoothReply::AdapterState(state))
     }
 
-    fn start_discovery(&mut self, filter: ScanFilter) {
+    async fn start_discovery(&mut self, filter: ScanFilter, transport: GattTransport) {
         trace!("BluetoothAdapter::start_discovery");
         let service_uuids = scan_filter_to_service_uuids(filter);
         let options: Retained<NSMutableDictionary<NSString, AnyObject>> =
@@ -1731,6 +1732,24 @@ impl CoreBluetoothInternal {
                 Some(&*Retained::into_super(options)),
             )
         };
+
+        // A BR/EDR GATT peripheral does not advertise as a BLE peripheral on
+        // macOS. CoreBluetooth can still expose it after the user has paired
+        // and connected it at the system level. Surface those peripherals
+        // through the normal discovery event path so callers can connect and
+        // use the existing GATT API without a second backend.
+        if transport != GattTransport::Le {
+            if let Some(service_uuids) = service_uuids {
+                let connected = unsafe {
+                    self.manager
+                        .retrieveConnectedPeripheralsWithServices(&service_uuids)
+                };
+                for peripheral in connected.iter() {
+                    self.on_discovered_peripheral(peripheral.retain(), None)
+                        .await;
+                }
+            }
+        }
     }
 
     fn stop_discovery(&mut self) {
