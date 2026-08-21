@@ -24,7 +24,7 @@
 pub(crate) mod bdaddr;
 pub mod bleuuid;
 
-use crate::Result;
+use crate::{Error, Result};
 use async_trait::async_trait;
 use bitflags::bitflags;
 use futures::stream::Stream;
@@ -57,6 +57,15 @@ pub enum AddressType {
     Random,
     #[default]
     Public,
+}
+
+/// Physical bearer used for GATT discovery.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+pub enum GattTransport {
+    Le,
+    BrEdr,
+    #[default]
+    Auto,
 }
 
 impl AddressType {
@@ -454,6 +463,23 @@ pub trait Central: Send + Sync + Clone {
     /// might require at least one filter for security reasons. Cross-platform code should provide
     /// a filter, but must be able to handle devices, which do not fit into the filter.
     async fn start_scan(&self, filter: ScanFilter) -> Result<()>;
+
+    /// Starts a GATT scan using the requested physical bearer.
+    ///
+    /// Platforms without explicit bearer support accept `Auto` and `Le` and
+    /// reject `BrEdr`.
+    async fn start_scan_with_transport(
+        &self,
+        filter: ScanFilter,
+        transport: GattTransport,
+    ) -> Result<()> {
+        match transport {
+            GattTransport::Le | GattTransport::Auto => self.start_scan(filter).await,
+            GattTransport::BrEdr => Err(Error::NotSupported(
+                "GATT over BR/EDR is not supported by this platform".to_string(),
+            )),
+        }
+    }
 
     /// Stops scanning for BLE devices.
     async fn stop_scan(&self) -> Result<()>;

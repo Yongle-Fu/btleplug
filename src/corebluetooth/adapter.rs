@@ -3,7 +3,7 @@ use super::internal::{
     run_corebluetooth_thread,
 };
 use super::peripheral::{Peripheral, PeripheralId};
-use crate::api::{Central, CentralEvent, CentralState, ScanFilter};
+use crate::api::{Central, CentralEvent, CentralState, GattTransport, ScanFilter};
 use crate::common::adapter_manager::AdapterManager;
 use crate::{Error, Result};
 use async_trait::async_trait;
@@ -109,9 +109,18 @@ impl Central for Adapter {
     }
 
     async fn start_scan(&self, filter: ScanFilter) -> Result<()> {
+        self.start_scan_with_transport(filter, GattTransport::Le)
+            .await
+    }
+
+    async fn start_scan_with_transport(
+        &self,
+        filter: ScanFilter,
+        transport: GattTransport,
+    ) -> Result<()> {
         self.sender
             .to_owned()
-            .send(CoreBluetoothMessage::StartScanning { filter })
+            .send(CoreBluetoothMessage::StartScanning { filter, transport })
             .await?;
         Ok(())
     }
