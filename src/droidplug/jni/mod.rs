@@ -18,6 +18,11 @@ pub fn init(env: &JNIEnv) -> crate::Result<()> {
                     fn_ptr: adapter_report_scan_result as *mut c_void,
                 },
                 NativeMethod {
+                    name: "reportBondedDevice".into(),
+                    sig: "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V".into(),
+                    fn_ptr: adapter_report_bonded_device as *mut c_void,
+                },
+                NativeMethod {
                     name: "onConnectionStateChanged".into(),
                     sig: "(Ljava/lang/String;Z)V".into(),
                     fn_ptr: adapter_on_connection_state_changed as *mut c_void,
@@ -134,6 +139,22 @@ impl From<::jni::errors::Error> for crate::Error {
 
 extern "C" fn adapter_report_scan_result(env: JNIEnv, obj: JObject, scan_result: JObject) {
     let _ = super::adapter::adapter_report_scan_result_internal(&env, obj, scan_result);
+}
+
+extern "C" fn adapter_report_bonded_device(
+    env: JNIEnv,
+    obj: JObject,
+    address: JString,
+    name: JString,
+    service_uuids: JObject,
+) {
+    let _ = super::adapter::adapter_report_bonded_device_internal(
+        &env,
+        obj,
+        address,
+        name,
+        service_uuids,
+    );
 }
 
 extern "C" fn adapter_on_connection_state_changed(

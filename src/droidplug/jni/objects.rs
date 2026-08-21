@@ -15,6 +15,7 @@ use crate::api::{BDAddr, CharPropFlags, PeripheralProperties, ScanFilter};
 pub struct JPeripheral<'a: 'b, 'b> {
     internal: JObject<'a>,
     connect: JMethodID<'a>,
+    connect_with_transport: JMethodID<'a>,
     disconnect: JMethodID<'a>,
     is_connected: JMethodID<'a>,
     discover_services: JMethodID<'a>,
@@ -66,6 +67,11 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
             class,
             "connect",
             "()Lio/github/gedgygedgy/rust/future/Future;",
+        )?;
+        let connect_with_transport = env.get_method_id(
+            class,
+            "connectWithTransport",
+            "(I)Lio/github/gedgygedgy/rust/future/Future;",
         )?;
         let disconnect = env.get_method_id(
             class,
@@ -126,6 +132,7 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
         Ok(Self {
             internal: obj,
             connect,
+            connect_with_transport,
             disconnect,
             is_connected,
             discover_services,
@@ -171,6 +178,19 @@ impl<'a: 'b, 'b> JPeripheral<'a, 'b> {
                 self.connect,
                 JavaType::Object("Lio/github/gedgygedgy/rust/future/Future;".to_string()),
                 &[],
+            )?
+            .l()?;
+        JFuture::from_env(self.env, future_obj)
+    }
+
+    pub fn connect_with_transport(&self, transport: jint) -> Result<JFuture<'a, 'b>> {
+        let future_obj = self
+            .env
+            .call_method_unchecked(
+                self.internal,
+                self.connect_with_transport,
+                JavaType::Object("Lio/github/gedgygedgy/rust/future/Future;".to_string()),
+                &[transport.into()],
             )?
             .l()?;
         JFuture::from_env(self.env, future_obj)

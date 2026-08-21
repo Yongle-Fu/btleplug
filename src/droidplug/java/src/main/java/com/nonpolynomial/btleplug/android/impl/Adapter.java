@@ -2,6 +2,7 @@ package com.nonpolynomial.btleplug.android.impl;
 
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -12,7 +13,9 @@ import android.os.Build;
 import android.os.ParcelUuid;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @SuppressWarnings("unused") // Native code uses this class.
 class Adapter {
@@ -55,6 +58,54 @@ class Adapter {
     }
 
     @SuppressLint("MissingPermission")
+    public void startScanWithTransport(ScanFilter filter, int transport) {
+        if (transport != BluetoothDevice.TRANSPORT_AUTO &&
+                transport != BluetoothDevice.TRANSPORT_BREDR &&
+                transport != BluetoothDevice.TRANSPORT_LE) {
+            throw new IllegalArgumentException("Invalid GATT transport: " + transport);
+        }
+        if (transport != BluetoothDevice.TRANSPORT_BREDR) {
+            startScan(filter);
+        }
+        if (transport != BluetoothDevice.TRANSPORT_LE) {
+            reportBondedClassicDevices(filter);
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private void reportBondedClassicDevices(ScanFilter filter) {
+        BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        if (bluetoothAdapter == null) {
+            throw new NoBluetoothAdapterException();
+        }
+
+        Set<String> requestedUuids = new HashSet<>();
+        for (String uuid : filter.getUuids()) {
+            requestedUuids.add(uuid.toLowerCase());
+        }
+        for (BluetoothDevice device : bluetoothAdapter.getBondedDevices()) {
+            ParcelUuid[] parcelUuids = device.getUuids();
+            ArrayList<String> serviceUuids = new ArrayList<>();
+            boolean matches = requestedUuids.isEmpty();
+            if (parcelUuids != null) {
+                for (ParcelUuid parcelUuid : parcelUuids) {
+                    String uuid = parcelUuid.getUuid().toString();
+                    serviceUuids.add(uuid);
+                    if (requestedUuids.contains(uuid.toLowerCase())) {
+                        matches = true;
+                    }
+                }
+            }
+            if (matches) {
+                reportBondedDevice(
+                        device.getAddress(),
+                        device.getName() == null ? "" : device.getName(),
+                        serviceUuids.toArray(new String[0]));
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     public void stopScan() {
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if (bluetoothAdapter != null) {
@@ -66,6 +117,8 @@ class Adapter {
     }
 
     private native void reportScanResult(ScanResult result);
+
+    private native void reportBondedDevice(String address, String name, String[] serviceUuids);
 
     public native void onConnectionStateChanged(String address, boolean connected);
 

@@ -297,6 +297,19 @@ pub trait Peripheral: Send + Sync + Clone + Debug {
     /// attempt to communicate with a device will fail until it is connected.
     async fn connect(&self) -> Result<()>;
 
+    /// Connect using the requested physical bearer.
+    ///
+    /// Platforms without explicit bearer support accept `Auto` and `Le` and
+    /// reject `BrEdr`.
+    async fn connect_with_transport(&self, transport: GattTransport) -> Result<()> {
+        match transport {
+            GattTransport::Le | GattTransport::Auto => self.connect().await,
+            GattTransport::BrEdr => Err(Error::NotSupported(
+                "GATT over BR/EDR is not supported by this platform".to_string(),
+            )),
+        }
+    }
+
     /// Like [`connect`](Peripheral::connect), but returns [`Error::TimedOut`](crate::Error::TimedOut)
     /// if the connection is not established within the given duration.
     async fn connect_with_timeout(&self, timeout: Duration) -> Result<()> {

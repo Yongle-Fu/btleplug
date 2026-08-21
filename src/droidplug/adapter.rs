@@ -8,7 +8,10 @@ use super::{
 };
 use crate::{
     Error, Result,
-    api::{BDAddr, Central, CentralEvent, CentralState, PeripheralProperties, ScanFilter},
+    api::{
+        BDAddr, Central, CentralEvent, CentralState, GattTransport, PeripheralProperties,
+        ScanFilter,
+    },
     common::adapter_manager::AdapterManager,
 };
 use async_trait::async_trait;
@@ -18,7 +21,7 @@ use jni::{
     JNIEnv,
     objects::{GlobalRef, JObject, JString},
     strings::JavaStr,
-    sys::jboolean,
+    sys::{jboolean, jobjectArray},
 };
 use std::{
     fmt::{Debug, Formatter},
@@ -26,6 +29,7 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Adapter {
@@ -87,6 +91,32 @@ impl Adapter {
                 }
                 None => Err(Error::DeviceNotFound),
             },
+        }
+    }
+
+    pub fn report_bonded_device(
+        &self,
+        address: BDAddr,
+        name: Option<String>,
+        services: Vec<Uuid>,
+    ) -> Result<Peripheral> {
+        let properties = PeripheralProperties {
+            address,
+            local_name: name.clone(),
+            advertisement_name: name,
+            services,
+            ..PeripheralProperties::default()
+        };
+        match self.manager.peripheral(&PeripheralId(address)) {
+            Some(peripheral) => {
+                self.report_properties(&peripheral, properties, false);
+                Ok(peripheral)
+            }
+            None => {
+                let peripheral = self.add(address)?;
+                self.report_properties(&peripheral, properties, true);
+                Ok(peripheral)
+            }
         }
     }
 
@@ -170,6 +200,49 @@ impl Central for Adapter {
         .result()?
     }
 
+    async fn start_scan_with_transport(
+        &self,
+        filter: ScanFilter,
+        transport: GattTransport,
+    ) -> Result<()> {
+        let env = global_jvm().get_env()?;
+        let filter = JScanFilter::new(&env, filter)?;
+        // android.bluetooth.BluetoothDevice transport constants:
+        // AUTO=0, BREDR=1, LE=2.
+        let transport = match transport {
+            GattTransport::Auto => 0,
+            GattTransport::BrEdr => 1,
+            GattTransport::Le => 2,
+        };
+        try_block(&env, || {
+            env.call_method(
+                &self.internal,
+                "startScanWithTransport",
+                "(Lcom/nonpolynomial/btleplug/android/impl/ScanFilter;I)V",
+                &[filter.into(), transport.into()],
+            )?;
+            Ok(Ok(()))
+        })
+        .catch(
+            JClass::from(
+                super::jni_utils::classcache::get_class(
+                    "com/nonpolynomial/btleplug/android/impl/NoBluetoothAdapterException",
+                )
+                .unwrap()
+                .as_obj(),
+            ),
+            |_ex| Ok(Err(Error::NoAdapterAvailable)),
+        )
+        .catch("java/lang/RuntimeException", |ex| {
+            let msg = env
+                .call_method(ex, "getMessage", "()Ljava/lang/String;", &[])?
+                .l()?;
+            let msgstr: String = env.get_string(msg.into())?.into();
+            Ok(Err(Error::RuntimeError(msgstr)))
+        })
+        .result()?
+    }
+
     async fn stop_scan(&self) -> Result<()> {
         let env = global_jvm().get_env()?;
         env.call_method(&self.internal, "stopScan", "()V", &[])?;
@@ -207,6 +280,39 @@ pub(crate) fn adapter_report_scan_result_internal(
 ) -> crate::Result<()> {
     let adapter = env.get_rust_field::<_, _, Adapter>(obj, "handle")?;
     adapter.report_scan_result(scan_result)?;
+    Ok(())
+}
+
+pub(crate) fn adapter_report_bonded_device_internal(
+    env: &JNIEnv,
+    obj: JObject,
+    address: JString,
+    name: JString,
+    service_uuids: JObject,
+) -> crate::Result<()> {
+    let adapter = env.get_rust_field::<_, _, Adapter>(obj, "handle")?;
+    let address = JavaStr::from_env(env, address)?;
+    let address = BDAddr::from_str(
+        address
+            .to_str()
+            .map_err(|error| Error::Other(error.into()))?,
+    )?;
+    let name = JavaStr::from_env(env, name)?;
+    let name = name
+        .to_str()
+        .map_err(|error| Error::Other(error.into()))?
+        .to_string();
+    let name = (!name.is_empty()).then_some(name);
+
+    let array = service_uuids.into_inner() as jobjectArray;
+    let mut services = Vec::with_capacity(env.get_array_length(array)? as usize);
+    for index in 0..env.get_array_length(array)? {
+        let value = env.get_object_array_element(array, index)?;
+        let value = JavaStr::from_env(env, JString::from(value))?;
+        let value = value.to_str().map_err(|error| Error::Other(error.into()))?;
+        services.push(Uuid::parse_str(value).map_err(|error| Error::Other(error.into()))?);
+    }
+    adapter.report_bonded_device(address, name, services)?;
     Ok(())
 }
 

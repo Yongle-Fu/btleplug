@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
+import android.os.Build;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ class Peripheral {
     private final BluetoothDevice device;
     private final Adapter adapter;
     private BluetoothGatt gatt;
+    private int connectionTransport = BluetoothDevice.TRANSPORT_AUTO;
     private final Callback callback;
     private boolean connected = false;
 
@@ -53,6 +55,22 @@ class Peripheral {
 
     @SuppressLint("MissingPermission")
     public Future<Void> connect() {
+        return connectWithTransport(BluetoothDevice.TRANSPORT_AUTO);
+    }
+
+    @SuppressLint("MissingPermission")
+    public Future<Void> connectWithTransport(int transport) {
+        if (transport != BluetoothDevice.TRANSPORT_AUTO &&
+                transport != BluetoothDevice.TRANSPORT_BREDR &&
+                transport != BluetoothDevice.TRANSPORT_LE) {
+            throw new IllegalArgumentException("Invalid GATT transport: " + transport);
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M &&
+                transport != BluetoothDevice.TRANSPORT_AUTO) {
+            throw new UnsupportedOperationException(
+                    "Explicit GATT transport requires Android 6.0 or newer");
+        }
+
         SimpleFuture<Void> future = new SimpleFuture<>();
         synchronized (this) {
             this.queueCommand(() -> {
@@ -72,19 +90,34 @@ class Peripheral {
                         }
                     };
 
-                    if (this.connected) {
+                    if (this.connected && this.connectionTransport == transport) {
                         Peripheral.this.wakeCommand(future, null);
-                    } else if (this.gatt == null) {
-                        try {
-                            this.setCommandCallback(callback);
-                            this.gatt = this.device.connectGatt(null, false, this.callback);
-                        } catch (SecurityException ex) {
-                            throw new PermissionDeniedException(ex);
-                        }
+                    } else if (this.connected) {
+                        throw new RuntimeException(
+                                "Disconnect before changing the GATT transport");
                     } else {
-                        this.setCommandCallback(callback);
-                        if (!this.gatt.connect()) {
-                            throw new RuntimeException("Unable to reconnect to device");
+                        if (this.gatt != null && this.connectionTransport != transport) {
+                            this.gatt.close();
+                            this.gatt = null;
+                        }
+                        if (this.gatt == null) {
+                            try {
+                                this.setCommandCallback(callback);
+                                this.connectionTransport = transport;
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    this.gatt = this.device.connectGatt(
+                                            null, false, this.callback, transport);
+                                } else {
+                                    this.gatt = this.device.connectGatt(null, false, this.callback);
+                                }
+                            } catch (SecurityException ex) {
+                                throw new PermissionDeniedException(ex);
+                            }
+                        } else {
+                            this.setCommandCallback(callback);
+                            if (!this.gatt.connect()) {
+                                throw new RuntimeException("Unable to reconnect to device");
+                            }
                         }
                     }
                 });
