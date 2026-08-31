@@ -1969,7 +1969,7 @@ impl CoreBluetoothInternal {
                         .retrieveConnectedPeripheralsWithServices(&service_uuids)
                 };
                 for peripheral in connected.iter() {
-                    self.on_discovered_peripheral(peripheral.retain(), None)
+                    self.on_discovered_peripheral(peripheral.clone(), None)
                         .await;
                 }
             }

@@ -8,14 +8,17 @@ use super::{
 };
 use crate::{
     Error, Result,
-    api::{BDAddr, Central, CentralEvent, CentralState, PeripheralProperties, ScanFilter},
+    api::{
+        BDAddr, Central, CentralEvent, CentralState, GattTransport, PeripheralProperties,
+        ScanFilter,
+    },
     common::adapter_manager::AdapterManager,
 };
 use async_trait::async_trait;
 use futures::stream::Stream;
 use jni::{
     Env, jni_sig, jni_str,
-    objects::{Global, JObject, JString},
+    objects::{Global, JObject, JObjectArray, JString},
     sys::jboolean,
 };
 use std::{
@@ -83,6 +86,31 @@ impl Adapter {
                 }
                 None => Err(Error::DeviceNotFound),
             },
+        }
+    }
+
+    pub fn report_bonded_device(
+        &self,
+        address: BDAddr,
+        local_name: Option<String>,
+        services: Vec<uuid::Uuid>,
+    ) -> Result<Peripheral> {
+        let properties = PeripheralProperties {
+            address,
+            local_name,
+            services,
+            ..PeripheralProperties::default()
+        };
+        match self.manager.peripheral(&PeripheralId(address)) {
+            Some(peripheral) => {
+                self.report_properties(&peripheral, properties, false);
+                Ok(peripheral)
+            }
+            None => {
+                let peripheral = self.add(address)?;
+                self.report_properties(&peripheral, properties, true);
+                Ok(peripheral)
+            }
         }
     }
 
@@ -176,6 +204,57 @@ impl Central for Adapter {
         })
     }
 
+    async fn start_scan_with_transport(
+        &self,
+        filter: ScanFilter,
+        transport: GattTransport,
+    ) -> Result<()> {
+        let transport = match transport {
+            GattTransport::Auto => 0,
+            GattTransport::BrEdr => 1,
+            GattTransport::Le => 2,
+        };
+        jvm()?.attach_current_thread(|env| {
+            let filter = JScanFilter::new(env, filter)?;
+            let filter_obj: JObject = filter.into();
+            match env.call_method(
+                self.internal.as_obj(),
+                jni_str!("startScanWithTransport"),
+                jni_sig!("(Lcom/nonpolynomial/btleplug/android/impl/ScanFilter;I)V"),
+                &[(&filter_obj).into(), transport.into()],
+            ) {
+                Ok(_) => Ok(()),
+                Err(jni::errors::Error::JavaException) => {
+                    let ex = env.exception_occurred().unwrap();
+                    env.exception_clear();
+                    let no_adapter_class =
+                        <super::jni::objects::JNoBluetoothAdapterException as jni::objects::Reference>::lookup_class(
+                            env,
+                            &Default::default(),
+                        )?;
+                    if env.is_instance_of(&ex, &*no_adapter_class)? {
+                        Err(Error::NoAdapterAvailable)
+                    } else if env.is_instance_of(&ex, jni_str!("java/lang/RuntimeException"))? {
+                        let msg = env
+                            .call_method(
+                                &ex,
+                                jni_str!("getMessage"),
+                                jni_sig!("()Ljava/lang/String;"),
+                                &[],
+                            )?
+                            .l()?;
+                        let jstr = env.cast_local::<JString>(msg)?;
+                        Err(Error::RuntimeError(String::from(jstr.mutf8_chars(env)?)))
+                    } else {
+                        let desc = throwable_to_string(env, &ex)?;
+                        Err(Error::RuntimeError(format!("Java exception: {desc}")))
+                    }
+                }
+                Err(error) => Err(error.into()),
+            }
+        })
+    }
+
     async fn stop_scan(&self) -> Result<()> {
         jvm()?.attach_current_thread(|env| {
             env.call_method(
@@ -226,6 +305,33 @@ pub(crate) fn adapter_report_scan_result_internal<'a>(
     let adapter_clone = adapter.clone();
     drop(adapter);
     adapter_clone.report_scan_result(env, scan_result)?;
+    Ok(())
+}
+
+pub(crate) fn adapter_report_bonded_device_internal<'local>(
+    env: &mut Env<'local>,
+    obj: &JObject<'local>,
+    address: JString<'local>,
+    name: JString<'local>,
+    service_uuids: JObject<'local>,
+) -> crate::Result<()> {
+    let address = BDAddr::from_str(&String::from(address.mutf8_chars(env)?))?;
+    let name = String::from(name.mutf8_chars(env)?);
+    let name = (!name.is_empty()).then_some(name);
+    let service_uuids = unsafe { JObjectArray::<JString>::from_raw(env, service_uuids.into_raw()) };
+    let mut services = Vec::with_capacity(service_uuids.len(env)?);
+    for index in 0..service_uuids.len(env)? {
+        let value = service_uuids.get_element(env, index)?;
+        let value = env.cast_local::<JString>(value)?;
+        services.push(uuid::Uuid::parse_str(&String::from(
+            value.mutf8_chars(env)?,
+        ))?);
+    }
+
+    let adapter = unsafe { env.get_rust_field::<_, _, Adapter>(obj, jni_str!("handle")) }?;
+    let adapter_clone = adapter.clone();
+    drop(adapter);
+    adapter_clone.report_bonded_device(address, name, services)?;
     Ok(())
 }
 

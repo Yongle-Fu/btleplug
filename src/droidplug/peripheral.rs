@@ -195,6 +195,53 @@ impl Peripheral {
         let result_ref = future.await?;
         self.with_obj(|env, _obj| get_poll_result(env, &result_ref).map(|_| {}))
     }
+
+    async fn connect_internal(&self, transport: api::GattTransport) -> Result<()> {
+        let android_transport = match transport {
+            api::GattTransport::Auto => 0,
+            api::GattTransport::BrEdr => 1,
+            api::GattTransport::Le => 2,
+        };
+        {
+            let future = self.with_obj(|env, obj| {
+                let future = obj.connect_with_transport(env, android_transport)?;
+                Ok(JSendFuture::new(env, &future)?)
+            })?;
+            let result_ref = future.await?;
+            self.with_obj(|env, _obj| get_poll_result(env, &result_ref).map(|_| {}))?;
+        }
+
+        // Query the system-cached device name and update local_name.
+        self.with_obj(|env, obj| -> std::result::Result<(), Error> {
+            if let Ok(Some(name)) = obj.get_device_name(env) {
+                let mut guard = self.shared.lock().map_err(Into::<Error>::into)?;
+                if let Some(ref mut props) = guard.properties {
+                    props.local_name = Some(name);
+                }
+            }
+            Ok(())
+        })?;
+
+        // Android's requestMtu is LE-specific. BR/EDR uses the bearer ATT MTU
+        // selected by the stack, so keep the conservative default there.
+        if transport != api::GattTransport::BrEdr {
+            let mtu_future = self.with_obj(|env, obj| {
+                let mtu_obj = obj.request_mtu(env, 517)?;
+                let mtu_future = env.cast_local::<JFuture>(mtu_obj)?;
+                Ok(JSendFuture::new(env, &mtu_future)?)
+            })?;
+            let mtu_result_ref = mtu_future.await?;
+            self.with_obj(|env, _obj| -> Result<()> {
+                let mtu_obj = get_poll_result(env, &mtu_result_ref)?;
+                let mtu_val = env
+                    .call_method(&mtu_obj, jni_str!("intValue"), jni_sig!("()I"), &[])?
+                    .i()?;
+                self.mtu.store(mtu_val as u16, Ordering::Relaxed);
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl Debug for Peripheral {
@@ -232,42 +279,11 @@ impl api::Peripheral for Peripheral {
     }
 
     async fn connect(&self) -> Result<()> {
-        {
-            let future = self.with_obj(|env, obj| {
-                let future = obj.connect(env)?;
-                Ok(JSendFuture::new(env, &future)?)
-            })?;
-            let result_ref = future.await?;
-            self.with_obj(|env, _obj| get_poll_result(env, &result_ref).map(|_| {}))?;
-        }
-        // Query the system-cached device name and update local_name
-        self.with_obj(|env, obj| -> std::result::Result<(), Error> {
-            if let Ok(Some(name)) = obj.get_device_name(env) {
-                let mut guard = self.shared.lock().map_err(Into::<Error>::into)?;
-                if let Some(ref mut props) = guard.properties {
-                    props.local_name = Some(name);
-                }
-            }
-            Ok(())
-        })?;
-        // Auto-negotiate maximum MTU (517) after connection
-        {
-            let mtu_future = self.with_obj(|env, obj| {
-                let mtu_obj = obj.request_mtu(env, 517)?;
-                let mtu_future = env.cast_local::<JFuture>(mtu_obj)?;
-                Ok(JSendFuture::new(env, &mtu_future)?)
-            })?;
-            let mtu_result_ref = mtu_future.await?;
-            self.with_obj(|env, _obj| -> Result<()> {
-                let mtu_obj = get_poll_result(env, &mtu_result_ref)?;
-                let mtu_val = env
-                    .call_method(&mtu_obj, jni_str!("intValue"), jni_sig!("()I"), &[])?
-                    .i()?;
-                self.mtu.store(mtu_val as u16, Ordering::Relaxed);
-                Ok(())
-            })?;
-        }
-        Ok(())
+        self.connect_internal(api::GattTransport::Auto).await
+    }
+
+    async fn connect_with_transport(&self, transport: api::GattTransport) -> Result<()> {
+        self.connect_internal(transport).await
     }
 
     async fn disconnect(&self) -> Result<()> {

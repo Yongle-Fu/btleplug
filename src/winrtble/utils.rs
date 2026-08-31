@@ -21,7 +21,6 @@ use windows::{
         GenericAttributeProfile::{
             GattCharacteristic, GattCharacteristicProperties,
             GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
-            GattDescriptor,
         },
     },
     Storage::Streams::{DataReader, IBuffer},
@@ -42,9 +41,9 @@ pub async fn pair_device(device: &BluetoothLEDevice) -> Result<()> {
     let dev_info = device
         .DeviceInformation()
         .map_err(|e| Error::Other(format!("Failed to get DeviceInformation: {:?}", e).into()))?;
-    let pairing = dev_info
-        .Pairing()
-        .map_err(|e| Error::Other(format!("Failed to get DeviceInformationPairing: {:?}", e).into()))?;
+    let pairing = dev_info.Pairing().map_err(|e| {
+        Error::Other(format!("Failed to get DeviceInformationPairing: {:?}", e).into())
+    })?;
 
     if !pairing.IsPaired().unwrap_or(false) {
         log::info!("Device is not paired. Initiating pairing...");
@@ -70,9 +69,7 @@ pub async fn pair_device(device: &BluetoothLEDevice) -> Result<()> {
     Ok(())
 }
 
-pub async fn pair_from_characteristic(
-    characteristic: &GattCharacteristic,
-) -> Result<()> {
+pub async fn pair_from_characteristic(characteristic: &GattCharacteristic) -> Result<()> {
     let service = characteristic
         .Service()
         .map_err(|e| Error::Other(format!("Failed to get Service: {:?}", e).into()))?;
@@ -81,8 +78,6 @@ pub async fn pair_from_characteristic(
         .map_err(|e| Error::Other(format!("Failed to get Device: {:?}", e).into()))?;
     pair_device(&device).await
 }
-
-
 
 pub fn to_error(status: GattCommunicationStatus) -> Result<()> {
     if status == GattCommunicationStatus::AccessDenied {

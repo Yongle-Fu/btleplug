@@ -10,6 +10,7 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.os.SystemClock;
 import android.util.Log;
+import android.os.Build;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -57,6 +58,7 @@ class Peripheral {
     private final BluetoothDevice device;
     private final Adapter adapter;
     private BluetoothGatt gatt;
+    private int connectionTransport = BluetoothDevice.TRANSPORT_AUTO;
     private final Callback callback;
     private boolean connected = false;
     // Set for the duration of a single Callback.onConnectionStateChange dispatch to suppress the
@@ -86,9 +88,25 @@ class Peripheral {
 
     @SuppressLint("MissingPermission")
     public Future<Void> connect() {
+        return connectWithTransport(BluetoothDevice.TRANSPORT_AUTO);
+    }
+
+    @SuppressLint("MissingPermission")
+    public Future<Void> connectWithTransport(int transport) {
+        if (transport != BluetoothDevice.TRANSPORT_AUTO &&
+                transport != BluetoothDevice.TRANSPORT_BREDR &&
+                transport != BluetoothDevice.TRANSPORT_LE) {
+            throw new IllegalArgumentException("Invalid GATT transport: " + transport);
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M &&
+                transport != BluetoothDevice.TRANSPORT_AUTO) {
+            throw new UnsupportedOperationException(
+                    "Explicit GATT transport requires Android 6.0 or newer");
+        }
+
         SimpleFuture<Void> future = new SimpleFuture<>();
         synchronized (this) {
-            this.queueCommand(() -> this.attemptConnect(future, 0));
+            this.queueCommand(() -> this.attemptConnect(future, 0, transport));
         }
         return future;
     }
@@ -111,7 +129,7 @@ class Peripheral {
     }
 
     @SuppressLint("MissingPermission")
-    private void attemptConnect(SimpleFuture<Void> future, int attempt) {
+    private void attemptConnect(SimpleFuture<Void> future, int attempt, int transport) {
         this.asyncWithFuture(future, () -> {
             long attemptStartMs = SystemClock.elapsedRealtime();
             CommandCallback callback = new CommandCallback(future) {
@@ -134,7 +152,7 @@ class Peripheral {
                                 RETRY_EXECUTOR.schedule(() -> {
                                     Peripheral.this.dispatchToCommandCallback("connectRetry", () -> {
                                         synchronized (Peripheral.this) {
-                                            Peripheral.this.attemptConnect(future, attempt + 1);
+                                            Peripheral.this.attemptConnect(future, attempt + 1, transport);
                                         }
                                     });
                                 }, CONNECT_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
@@ -156,12 +174,24 @@ class Peripheral {
                 }
             };
 
+            if (this.connected && this.connectionTransport != transport) {
+                throw new RuntimeException("Disconnect before changing the GATT transport");
+            }
+            if (!this.connected && this.gatt != null && this.connectionTransport != transport) {
+                this.gatt.close();
+                this.gatt = null;
+            }
             if (this.connected) {
                 Peripheral.this.wakeCommand(future, null);
             } else if (this.gatt == null) {
                 try {
                     this.setCommandCallback(callback);
-                    this.gatt = this.device.connectGatt(null, false, this.callback);
+                    this.connectionTransport = transport;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        this.gatt = this.device.connectGatt(null, false, this.callback, transport);
+                    } else {
+                        this.gatt = this.device.connectGatt(null, false, this.callback);
+                    }
                     if (this.gatt == null) {
                         throw new NotConnectedException();
                     }
