@@ -1738,16 +1738,16 @@ impl CoreBluetoothInternal {
         // and connected it at the system level. Surface those peripherals
         // through the normal discovery event path so callers can connect and
         // use the existing GATT API without a second backend.
-        if transport != GattTransport::Le {
-            if let Some(service_uuids) = service_uuids {
-                let connected = unsafe {
-                    self.manager
-                        .retrieveConnectedPeripheralsWithServices(&service_uuids)
-                };
-                for peripheral in connected.iter() {
-                    self.on_discovered_peripheral(peripheral.clone(), None)
-                        .await;
-                }
+        if transport != GattTransport::Le
+            && let Some(service_uuids) = service_uuids
+        {
+            let connected = unsafe {
+                self.manager
+                    .retrieveConnectedPeripheralsWithServices(&service_uuids)
+            };
+            for peripheral in connected.iter() {
+                self.on_discovered_peripheral(peripheral.clone(), None)
+                    .await;
             }
         }
     }
