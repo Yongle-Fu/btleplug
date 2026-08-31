@@ -50,6 +50,7 @@ pub struct PeripheralId(pub(crate) DeviceId);
 
 impl PeripheralId {
     /// Construct an identifier from either a BlueZ object path or its display form.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Self {
         let object_path = if value.starts_with("/org/bluez/") {
             value.to_owned()
