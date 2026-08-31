@@ -48,6 +48,18 @@ struct ServiceInternal {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PeripheralId(pub(crate) DeviceId);
 
+impl PeripheralId {
+    /// Construct an identifier from either a BlueZ object path or its display form.
+    pub fn from_str(value: &str) -> Self {
+        let object_path = if value.starts_with("/org/bluez/") {
+            value.to_owned()
+        } else {
+            format!("/org/bluez/{value}")
+        };
+        Self(DeviceId::new(&object_path))
+    }
+}
+
 impl Display for PeripheralId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.0.fmt(f)

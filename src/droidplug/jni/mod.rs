@@ -41,6 +41,11 @@ fn init_inner(env: &mut Env) -> crate::Result<()> {
                         jni_str!("(Landroid/bluetooth/le/ScanResult;)V"),
                         adapter_report_scan_result as *mut c_void,
                     ),
+                    NativeMethod::from_raw_parts(
+                        jni_str!("reportBondedDevice"),
+                        jni_str!("(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V"),
+                        adapter_report_bonded_device as *mut c_void,
+                    ),
                     native_method! {
                         name = "onConnectionStateChanged",
                         sig = (addr: JString, connected: jboolean) -> (),
@@ -117,6 +122,25 @@ extern "C" fn adapter_report_scan_result<'local>(
 ) {
     env.with_env(|env| super::adapter::adapter_report_scan_result_internal(env, &obj, scan_result))
         .resolve::<ThrowRuntimeExAndDefault>();
+}
+
+extern "C" fn adapter_report_bonded_device<'local>(
+    mut env: EnvUnowned<'local>,
+    obj: JObject<'local>,
+    address: JString<'local>,
+    name: JString<'local>,
+    service_uuids: JObject<'local>,
+) {
+    env.with_env(|env| {
+        super::adapter::adapter_report_bonded_device_internal(
+            env,
+            &obj,
+            address,
+            name,
+            service_uuids,
+        )
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 fn adapter_on_connection_state_changed<'local>(

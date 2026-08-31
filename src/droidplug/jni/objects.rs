@@ -80,6 +80,22 @@ impl<'local> JPeripheral<'local> {
         env.cast_local::<JFuture>(raw)
     }
 
+    pub fn connect_with_transport(
+        &self,
+        env: &mut Env<'local>,
+        transport: jint,
+    ) -> Result<JFuture<'local>> {
+        let raw = env
+            .call_method(
+                self,
+                jni_str!("connectWithTransport"),
+                jni_sig!("(I)Lio/github/gedgygedgy/rust/future/Future;"),
+                &[transport.into()],
+            )?
+            .l()?;
+        env.cast_local::<JFuture>(raw)
+    }
+
     pub fn disconnect(&self, env: &mut Env<'local>) -> Result<JFuture<'local>> {
         let raw = env
             .call_method(

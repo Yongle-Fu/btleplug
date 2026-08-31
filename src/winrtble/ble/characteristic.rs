@@ -87,7 +87,9 @@ impl BLECharacteristic {
                 }
                 Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
                     attempts += 1;
-                    if let Err(pair_err) = utils::pair_from_characteristic(&self.characteristic).await {
+                    if let Err(pair_err) =
+                        utils::pair_from_characteristic(&self.characteristic).await
+                    {
                         log::warn!("Auto-pairing failed during write: {:?}", pair_err);
                         return Err(Error::from(err));
                     }
@@ -126,7 +128,9 @@ impl BLECharacteristic {
                 }
                 Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
                     attempts += 1;
-                    if let Err(pair_err) = utils::pair_from_characteristic(&self.characteristic).await {
+                    if let Err(pair_err) =
+                        utils::pair_from_characteristic(&self.characteristic).await
+                    {
                         log::warn!("Auto-pairing failed during read: {:?}", pair_err);
                         return Err(Error::from(err));
                     }
@@ -206,7 +210,9 @@ impl BLECharacteristic {
                 }
                 Err(err) if attempts == 0 && utils::is_encryption_error(&err) => {
                     attempts += 1;
-                    if let Err(pair_err) = utils::pair_from_characteristic(&self.characteristic).await {
+                    if let Err(pair_err) =
+                        utils::pair_from_characteristic(&self.characteristic).await
+                    {
                         log::warn!("Auto-pairing failed during subscribe: {:?}", pair_err);
                         let _ = self.remove_notify_handler();
                         return Err(Error::from(err));

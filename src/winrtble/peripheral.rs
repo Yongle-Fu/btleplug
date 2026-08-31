@@ -578,7 +578,8 @@ impl ApiPeripheral for Peripheral {
                                             .unwrap_or(Vec::new())
                                             .into_iter()
                                             .map(|descriptor| {
-                                                let descriptor = BLEDescriptor::new(c.clone(), descriptor);
+                                                let descriptor =
+                                                    BLEDescriptor::new(c.clone(), descriptor);
                                                 (descriptor.uuid(), descriptor)
                                             })
                                             .collect(),

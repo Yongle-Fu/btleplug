@@ -380,6 +380,12 @@ impl api::Peripheral for Peripheral {
         Ok(())
     }
 
+    async fn connect_with_transport(&self, _transport: api::GattTransport) -> Result<()> {
+        // CoreBluetooth selects the physical bearer. BR/EDR GATT peripherals
+        // retrieved from the system use the same connection API as LE devices.
+        self.connect().await
+    }
+
     async fn disconnect(&self) -> Result<()> {
         let fut = CoreBluetoothReplyFuture::default();
         self.shared
