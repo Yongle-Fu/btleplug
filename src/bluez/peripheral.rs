@@ -52,12 +52,12 @@ impl PeripheralId {
     /// Construct an identifier from either a BlueZ object path or its display form.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Self {
-        let object_path = if value.starts_with("/org/bluez/") {
-            value.to_owned()
-        } else {
-            format!("/org/bluez/{value}")
-        };
-        Self(DeviceId::new(&object_path))
+        let display_id = value.strip_prefix("/org/bluez/").unwrap_or(value);
+        Self(
+            display_id
+                .parse()
+                .expect("Invalid BlueZ peripheral identifier"),
+        )
     }
 }
 
@@ -465,7 +465,16 @@ fn is_no_notify_session(error: &dbus::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_no_notify_session;
+    use super::{PeripheralId, is_no_notify_session};
+
+    #[test]
+    fn peripheral_identifier_accepts_display_and_object_path_forms() {
+        let display = "hci0/dev_12_34_56_C2_9B_A8";
+        let short = PeripheralId::from_str(display);
+        let full = PeripheralId::from_str(&format!("/org/bluez/{display}"));
+        assert_eq!(short, full);
+        assert_eq!(short.to_string(), display);
+    }
 
     #[test]
     fn no_notify_session_error_is_recognised() {
