@@ -108,7 +108,10 @@ impl Peripheral {
             services: Vec::new(),
             class: None,
         });
-        let (notifications_channel, _) = broadcast::channel(16);
+        // Match the delegate event queue: its buffered notifications can be
+        // forwarded in one burst before the downstream task is scheduled.
+        let (notifications_channel, _) =
+            broadcast::channel(crate::common::util::NOTIFICATION_BUFFER_CAPACITY);
 
         let shared = Arc::new(Shared {
             properties,
@@ -127,6 +130,9 @@ impl Peripheral {
             loop {
                 match event_receiver.next().await {
                     Some(PeripheralEventInternal::Notification(uuid, service_uuid, data)) => {
+                        trace!(target: "btleplug::notification_ingress",
+                            "device={} queued={} value={:?}",
+                            shared.uuid, shared.notifications_channel.len(), data);
                         let notification = ValueNotification {
                             uuid,
                             service_uuid,
@@ -609,5 +615,47 @@ impl From<Uuid> for PeripheralId {
 impl From<SendError> for Error {
     fn from(_: SendError) -> Self {
         Error::Other("Channel closed".to_string().into())
+    }
+}
+
+#[cfg(test)]
+mod notification_burst_tests {
+    use super::*;
+    use crate::api::Peripheral as _;
+    use std::time::Duration;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_delegate_burst_preserves_every_notification() {
+        let (mut events, receiver) = futures::channel::mpsc::channel(256);
+        let (commands, _) = futures::channel::mpsc::channel(1);
+        let peripheral = Peripheral::new(Uuid::nil(), None, None, Weak::new(), receiver, commands);
+        let mut notifications = peripheral.notifications().await.unwrap();
+        // A short scheduler stall can leave a burst in the existing delegate
+        // queue. Exercise the real event pump before polling the consumer.
+        for sequence in 0_u8..64 {
+            events
+                .send(PeripheralEventInternal::Notification(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    vec![sequence],
+                ))
+                .await
+                .unwrap();
+        }
+        drop(events);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while Arc::strong_count(&peripheral.shared) != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        for sequence in 0_u8..64 {
+            let notification = tokio::time::timeout(Duration::from_secs(1), notifications.next())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(notification.value, vec![sequence]);
+        }
     }
 }

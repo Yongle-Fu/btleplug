@@ -117,7 +117,8 @@ fn should_accept_name(has_complete_name: bool, new_name_is_complete: bool) -> bo
 
 impl Peripheral {
     pub(crate) fn new(adapter: Weak<AdapterManager<Self>>, address: BDAddr) -> Self {
-        let (broadcast_sender, _) = broadcast::channel(16);
+        let (broadcast_sender, _) =
+            broadcast::channel(crate::common::util::NOTIFICATION_BUFFER_CAPACITY);
         Peripheral {
             shared: Arc::new(Shared {
                 adapter,
