@@ -25,7 +25,7 @@ struct TestPeripheralState {
 }
 
 define_class!(
-    #[unsafe(super(CBPeripheral))]
+    #[unsafe(super(objc2_foundation::NSObject))]
     #[thread_kind = AnyThread]
     #[ivars = TestPeripheralState]
     struct TestPeripheral;
@@ -77,6 +77,12 @@ impl TestPeripheral {
             set_notify_calls: Mutex::new(Vec::new()),
         });
         unsafe { msg_send![super(this), init] }
+    }
+
+    // The mock implements only the peripheral selectors exercised by these tests.
+    // CBPeripheral's initializer is unavailable on recent macOS releases.
+    fn as_peripheral(&self) -> &CBPeripheral {
+        unsafe { &*(self as *const Self as *const CBPeripheral) }
     }
 
     fn set_notify_calls(&self) -> Vec<RecordedSetNotify> {
@@ -176,8 +182,10 @@ impl NotificationFixture {
         unsafe { service.setCharacteristics(Some(&attached_characteristics)) };
 
         let (event_sender, _) = mpsc::channel(1);
-        let mut internal =
-            PeripheralInternal::new(Retained::into_super(peripheral.clone()), event_sender);
+        let mut internal = PeripheralInternal::new(
+            unsafe { Retained::cast_unchecked(peripheral.clone()) },
+            event_sender,
+        );
         internal.services.insert(
             service_uuid,
             ServiceInternal {
@@ -227,7 +235,7 @@ async fn deliver_notification_state_callback(
         fixture
             .delegate
             .peripheral_didUpdateNotificationStateForCharacteristic_error(
-                peripheral,
+                peripheral.as_peripheral(),
                 characteristic,
                 error,
             );
@@ -464,8 +472,10 @@ async fn descriptor_discovery_error_completes_service_discovery_without_descript
     let service: Retained<CBService> = Retained::into_super(service);
 
     let (event_sender, _) = mpsc::channel(1);
-    let mut internal =
-        PeripheralInternal::new(Retained::into_super(peripheral.clone()), event_sender);
+    let mut internal = PeripheralInternal::new(
+        unsafe { Retained::cast_unchecked(peripheral.clone()) },
+        event_sender,
+    );
     internal.services.insert(
         service_uuid,
         ServiceInternal {
@@ -487,7 +497,7 @@ async fn descriptor_discovery_error_completes_service_discovery_without_descript
     let error = NSError::new(1, ns_string!("BtlePlugCoreBluetoothTests"));
     unsafe {
         delegate.peripheral_didDiscoverDescriptorsForCharacteristic_error(
-            &peripheral,
+            peripheral.as_peripheral(),
             &characteristic,
             Some(&error),
         );
@@ -572,7 +582,7 @@ async fn characteristic_discovery_error_completes_service_with_no_characteristic
     let error = NSError::new(1, ns_string!("BtlePlugCoreBluetoothTests"));
     unsafe {
         delegate.peripheral_didDiscoverCharacteristicsForService_error(
-            &peripheral,
+            peripheral.as_peripheral(),
             &service,
             Some(&error),
         );
@@ -622,7 +632,7 @@ async fn service_discovery_error_emits_error_event() {
     let delegate = CentralDelegate::new(delegate_sender);
     let error = NSError::new(1, ns_string!("BtlePlugCoreBluetoothTests"));
     unsafe {
-        delegate.peripheral_didDiscoverServices(&peripheral, Some(&error));
+        delegate.peripheral_didDiscoverServices(peripheral.as_peripheral(), Some(&error));
     }
 
     let event = tokio::time::timeout(Duration::from_secs(1), delegate_receiver.next())
@@ -652,7 +662,10 @@ fn new_test_internal(peripheral_uuid: Uuid) -> (Retained<TestPeripheral>, Periph
             .expect("valid peripheral UUID");
     let peripheral = TestPeripheral::new(peripheral_identifier);
     let (event_sender, _) = mpsc::channel(1);
-    let internal = PeripheralInternal::new(Retained::into_super(peripheral.clone()), event_sender);
+    let internal = PeripheralInternal::new(
+        unsafe { Retained::cast_unchecked(peripheral.clone()) },
+        event_sender,
+    );
     (peripheral, internal)
 }
 
@@ -2094,7 +2107,7 @@ fn deliver_discovered_peripheral(
             .delegate
             .centralManager_didDiscoverPeripheral_advertisementData_RSSI(
                 &internal.manager,
-                peripheral,
+                peripheral.as_peripheral(),
                 &adv_data,
                 &rssi,
             );
@@ -2328,20 +2341,30 @@ fn autorelease_pool_window_releases_autoreleased_objects() {
 
 #[tokio::test]
 async fn confirmed_disconnect_succeeds_for_all_waiters_and_cancels_other_operations() {
-    let (_, mut internal) = new_test_internal(Uuid::new_v4());
+    let (_, mut internal) = new_test_internal(Uuid::from_u128(0x123456789abcdef));
     let first = CoreBluetoothReplyFuture::default();
     let second = CoreBluetoothReplyFuture::default();
     let connect = CoreBluetoothReplyFuture::default();
     let discovery = CoreBluetoothReplyFuture::default();
-    internal.disconnected_future_state.push_back(first.get_state_clone());
-    internal.disconnected_future_state.push_back(second.get_state_clone());
-    internal.connected_future_state.push_back(connect.get_state_clone());
-    internal.services_discovered_future_state.push_back(discovery.get_state_clone());
+    internal
+        .disconnected_future_state
+        .push_back(first.get_state_clone());
+    internal
+        .disconnected_future_state
+        .push_back(second.get_state_clone());
+    internal
+        .connected_future_state
+        .push_back(connect.get_state_clone());
+    internal
+        .services_discovered_future_state
+        .push_back(discovery.get_state_clone());
     internal.confirm_disconnect();
     assert!(matches!(first.await, CoreBluetoothReply::Ok));
     assert!(matches!(second.await, CoreBluetoothReply::Ok));
     for reply in [connect.await, discovery.await] {
-        assert!(matches!(reply, CoreBluetoothReply::Err(ref message) if message == "Device disconnected"));
+        assert!(
+            matches!(reply, CoreBluetoothReply::Err(ref message) if message == "Device disconnected")
+        );
     }
     internal.confirm_disconnect();
     assert!(internal.disconnected_future_state.is_empty());
