@@ -387,6 +387,10 @@ impl PeripheralInternal {
     }
 
     pub fn confirm_disconnect(&mut self) {
+        // The requested terminal state has been reached; other operations fail.
+        if let Some(future) = self.disconnected_future_state.take() {
+            future.lock().unwrap().set_reply(CoreBluetoothReply::Ok);
+        }
         self.drain_pending_operations("Device disconnected");
     }
 
@@ -1793,7 +1797,7 @@ mod tests {
     use std::time::Duration;
 
     define_class!(
-        #[unsafe(super(CBPeripheral))]
+        #[unsafe(super(objc2_foundation::NSObject))]
         #[thread_kind = AnyThread]
         #[ivars = Retained<NSUUID>]
         struct TestPeripheral;
@@ -1853,13 +1857,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn confirmed_disconnect_succeeds_and_cancels_other_pending_operations() {
+        let identifier = NSUUID::initWithUUIDString(
+            NSUUID::alloc(),
+            &NSString::from_str("12345678-1234-5678-1234-567812345678"),
+        )
+        .unwrap();
+        let (sender, _) = mpsc::channel(1);
+        let mut internal = PeripheralInternal::new(
+            unsafe { Retained::cast_unchecked(TestPeripheral::new(identifier)) },
+            sender,
+        );
+        let disconnect = CoreBluetoothReplyFuture::default();
+        let connect = CoreBluetoothReplyFuture::default();
+        let discovery = CoreBluetoothReplyFuture::default();
+        let rssi = CoreBluetoothReplyFuture::default();
+        internal.disconnected_future_state = Some(disconnect.get_state_clone());
+        internal.connected_future_state = Some(connect.get_state_clone());
+        internal.services_discovered_future_state = Some(discovery.get_state_clone());
+        internal
+            .read_rssi_future_state
+            .push_back(rssi.get_state_clone());
+        internal.confirm_disconnect();
+        assert!(matches!(disconnect.await, CoreBluetoothReply::Ok));
+        for reply in [connect.await, discovery.await, rssi.await] {
+            assert!(
+                matches!(reply, CoreBluetoothReply::Err(ref message) if message == "Device disconnected")
+            );
+        }
+        // An unsolicited or duplicate notification has no disconnect waiter.
+        internal.confirm_disconnect();
+        assert!(internal.disconnected_future_state.is_none());
+        assert!(internal.read_rssi_future_state.is_empty());
+    }
+
+    #[tokio::test]
     async fn descriptor_discovery_error_completes_service_discovery_without_descriptors() {
         let peripheral_uuid = Uuid::from_u128(0x12345678_1234_5678_1234_567812345678);
         let peripheral_uuid_string = NSString::from_str(&peripheral_uuid.to_string());
         let peripheral_identifier =
             NSUUID::initWithUUIDString(NSUUID::alloc(), &peripheral_uuid_string)
                 .expect("valid peripheral UUID");
-        let peripheral = TestPeripheral::new(peripheral_identifier);
+        // This mock implements only the selectors used below. CBPeripheral's
+        // own initializer is unavailable on recent macOS versions.
+        let peripheral: Retained<CBPeripheral> =
+            unsafe { Retained::cast_unchecked(TestPeripheral::new(peripheral_identifier)) };
         let service_uuid = Uuid::from_u128(0x0000180f_0000_1000_8000_00805f9b34fb);
         let characteristic_uuid = Uuid::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
         let service_cbuuid = uuid_to_cbuuid(service_uuid);
@@ -1882,8 +1924,7 @@ mod tests {
         let service: Retained<CBService> = Retained::into_super(service);
 
         let (event_sender, _) = mpsc::channel(1);
-        let mut internal =
-            PeripheralInternal::new(Retained::into_super(peripheral.clone()), event_sender);
+        let mut internal = PeripheralInternal::new(peripheral.clone(), event_sender);
         internal.services.insert(
             service_uuid,
             ServiceInternal {
