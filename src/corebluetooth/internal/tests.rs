@@ -2325,3 +2325,24 @@ fn autorelease_pool_window_releases_autoreleased_objects() {
     .join()
     .unwrap();
 }
+
+#[tokio::test]
+async fn confirmed_disconnect_succeeds_for_all_waiters_and_cancels_other_operations() {
+    let (_, mut internal) = new_test_internal(Uuid::new_v4());
+    let first = CoreBluetoothReplyFuture::default();
+    let second = CoreBluetoothReplyFuture::default();
+    let connect = CoreBluetoothReplyFuture::default();
+    let discovery = CoreBluetoothReplyFuture::default();
+    internal.disconnected_future_state.push_back(first.get_state_clone());
+    internal.disconnected_future_state.push_back(second.get_state_clone());
+    internal.connected_future_state.push_back(connect.get_state_clone());
+    internal.services_discovered_future_state.push_back(discovery.get_state_clone());
+    internal.confirm_disconnect();
+    assert!(matches!(first.await, CoreBluetoothReply::Ok));
+    assert!(matches!(second.await, CoreBluetoothReply::Ok));
+    for reply in [connect.await, discovery.await] {
+        assert!(matches!(reply, CoreBluetoothReply::Err(ref message) if message == "Device disconnected"));
+    }
+    internal.confirm_disconnect();
+    assert!(internal.disconnected_future_state.is_empty());
+}
