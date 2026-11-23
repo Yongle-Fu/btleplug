@@ -27,10 +27,34 @@ use windows::{
     },
     Foundation::TypedEventHandler,
 };
+use windows_future::IAsyncOperation;
 
-/// Timeout for uncached GATT operations before falling back to cached mode.
-/// Some Windows BLE drivers hang indefinitely on uncached requests (see #325).
-const GATT_CACHE_TIMEOUT: Duration = Duration::from_secs(5);
+const GATT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn discover_gatt_metadata<T: windows::core::RuntimeType + 'static>(
+    attribute: &str,
+    query: impl Fn(BluetoothCacheMode) -> windows::core::Result<IAsyncOperation<T>>,
+) -> Result<T> {
+    // Windows queries the device on a cache miss and invalidates the cache on
+    // Service Changed. Starting uncached can stall subsequent requests (#325).
+    for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        let operation = query(cache_mode)?;
+        match timeout(GATT_DISCOVERY_TIMEOUT, operation.clone().into_future()).await {
+            Ok(result) => return Ok(result?),
+            Err(_) => {
+                if let Err(error) = operation.Cancel() {
+                    debug!("Failed to cancel timed-out GATT {attribute} discovery: {error:?}");
+                }
+                if cache_mode == BluetoothCacheMode::Cached {
+                    warn!("Cached GATT {attribute} discovery timed out; retrying uncached");
+                }
+            }
+        }
+    }
+    Err(Error::Other(
+        format!("GATT {attribute} discovery timed out").into(),
+    ))
+}
 
 pub type ConnectedEventHandler = Box<dyn Fn(bool) + Send>;
 pub type MaxPduSizeChangedEventHandler = Box<dyn Fn(u16) + Send>;
@@ -129,22 +153,10 @@ impl BLEDevice {
     pub async fn get_characteristics(
         service: &GattDeviceService,
     ) -> Result<Vec<GattCharacteristic>> {
-        let async_result = match timeout(
-            GATT_CACHE_TIMEOUT,
-            service
-                .GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Uncached)?
-                .into_future(),
-        )
-        .await
-        {
-            Ok(result) => result?,
-            Err(_) => {
-                warn!("Uncached characteristic discovery timed out, falling back to cached mode");
-                service
-                    .GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Cached)?
-                    .await?
-            }
-        };
+        let async_result = discover_gatt_metadata("characteristic", |cache_mode| {
+            service.GetCharacteristicsWithCacheModeAsync(cache_mode)
+        })
+        .await?;
 
         match async_result.Status() {
             Ok(GattCommunicationStatus::Success) => {
@@ -172,22 +184,10 @@ impl BLEDevice {
     pub async fn get_characteristic_descriptors(
         characteristic: &GattCharacteristic,
     ) -> Result<Vec<GattDescriptor>> {
-        let async_result = match timeout(
-            GATT_CACHE_TIMEOUT,
-            characteristic
-                .GetDescriptorsWithCacheModeAsync(BluetoothCacheMode::Uncached)?
-                .into_future(),
-        )
-        .await
-        {
-            Ok(result) => result?,
-            Err(_) => {
-                warn!("Uncached descriptor discovery timed out, falling back to cached mode");
-                characteristic
-                    .GetDescriptorsWithCacheModeAsync(BluetoothCacheMode::Cached)?
-                    .await?
-            }
-        };
+        let async_result = discover_gatt_metadata("descriptor", |cache_mode| {
+            characteristic.GetDescriptorsWithCacheModeAsync(cache_mode)
+        })
+        .await?;
         let status = async_result.Status();
         if status == Ok(GattCommunicationStatus::Success) {
             let results = async_result.Descriptors()?;
