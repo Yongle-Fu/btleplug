@@ -14,3 +14,4 @@ test-peripheral/zephyr/build*
 tests/android/gradle/
 tests/android/gradlew
 .worktrees/
+build/
